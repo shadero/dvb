@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -56,14 +57,16 @@ func main() {
 		"sys", "t",
 		"delivery system type: t, s, s2, ca, cb, cc",
 	)
-	freq := flag.Float64(
-		"freq", 0,
-		"frequency [Mhz]",
-	)
-	sr := flag.Uint(
-		"sr", 0,
-		"symbol rate [kBd]",
-	)
+	channel := flag.String("channel", "", "channel name")
+	conf := flag.String("conf", "", "configuration file")
+	// freq := flag.Float64(
+	// 	"freq", 0,
+	// 	"frequency [Mhz]",
+	// )
+	// sr := flag.Uint(
+	// 	"sr", 0,
+	// 	"symbol rate [kBd]",
+	// )
 	pol := flag.String(
 		"pol", "h",
 		"polarization: h, v",
@@ -86,6 +89,48 @@ func main() {
 	if flag.NArg() == 0 {
 		usage()
 	}
+
+	file, _ := os.Open(*conf)
+    defer file.Close()
+
+    scanner := bufio.NewScanner(file)
+    inTargetSection := false
+    var freq int64
+    var sr uint
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+
+        if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+            section := line[1 : len(line)-1]
+            if section == *channel {
+                inTargetSection = true
+            } else {
+                inTargetSection = false
+            }
+        }
+
+        if inTargetSection {
+            if strings.HasPrefix(line, "FREQUENCY") {
+                parts := strings.Split(line, "=")
+                if len(parts) == 2 {
+                    frequencyStr := strings.TrimSpace(parts[1])
+                    freq, _ = strconv.ParseInt(frequencyStr, 10, 64)
+                    freq /= 1000000
+                }
+            }
+            if strings.HasPrefix(line, "SYMBOL_RATE") {
+                parts := strings.Split(line, "=")
+                if len(parts) == 2 {
+                    symbolRateStr := strings.TrimSpace(parts[1])
+                    symbolRateInt, _ := strconv.ParseUint(symbolRateStr, 10, 32)
+                    sr = uint(symbolRateInt / 1000)
+                }
+            }
+        }
+    }
+
+	// fmt.Println("freq: ", freq)
+	// fmt.Println("sr: ", sr)
 
 	pids := make([]int16, flag.NArg())
 	for i, a := range flag.Args() {
@@ -113,7 +158,7 @@ func main() {
 	)
 	switch *src {
 	case "rf":
-		fe, err = internal.Tune(*fpath, *sys, *pol, int64(*freq*1e6), int(*bw*1e6), *sr*1e3)
+		fe, err = internal.Tune(*fpath, *sys, *pol, int64(freq*1e6), int(*bw*1e6), sr*1e3)
 		checkErr(err)
 		checkErr(internal.WaitForTune(fe, time.Now().Add(5*time.Second), true))
 		r, filter = setFilter(*dmxpath, *dvrpath, pids)
